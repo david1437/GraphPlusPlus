@@ -1,7 +1,6 @@
-#ifndef _GRAPH_BASE_HPP
-#define _GRAPH_BASE_HPP
+#ifndef GRAPH_BASE_HPP
+#define GRAPH_BASE_HPP
 
-#include <deque>
 #include <cstdint>
 #include <functional>
 #include <initializer_list>
@@ -13,11 +12,12 @@
 #include <utility>
 #include <exception>
 #include "graph_exception.hpp"
+#include "graph_types.hpp"
 
 template <class Type,
 	  class Mapped = std::vector<std::pair<Type,double>>,
 	  class Container = std::map<Type, Mapped>,
-	  bool  Directed = false>
+	  class Directed = std::false_type>
 struct graph_base
 {
 	// Container types
@@ -51,15 +51,15 @@ struct graph_base
 	const_reverse_iterator crend() { return graph_map.crend(); }
 
 	// helper functions
-	bool check_key_exist(const key_type& key) {
+	bool check_key_exist(const key_type& key) const {
 		return graph_map.find(key) != graph_map.end();
 	}
 	void invalidateEdges(const key_type& key) {
 		for(auto iter = graph_map.begin(); iter != graph_map.end(); ++iter) {
-			auto search = std::find_if(iter->second.begin(), iter->second.end(), [&](const value_type& element) { return element.first == key; });
+			const auto& search = std::find_if(iter->second.begin(), iter->second.end(), [&](const value_type& element) { return element.first == key; });
 			if(search != iter->second.end()) {
 				iter->second.erase(search);
-				if (!Directed) {
+				if constexpr(std::is_same_v<Directed, std::true_type>) {
 					num_edges -= 2;
 				} else {
 					--num_edges;
@@ -67,65 +67,17 @@ struct graph_base
 			}
 		}
 	}
-	bool checkEdgeExists(const key_type& key1, const key_type& key2) {
-		const auto& neighbors_key1 = graph_map[key1];
-		auto search_key2_in_key1 = std::find_if(neighbors_key1.begin(), neighbors_key1.end(), [&](const value_type& element) { return element.first == key2; });
-		if(Directed) {
+	bool checkEdgeExists(const key_type& key1, const key_type& key2) const {
+		const auto& neighbors_key1 = graph_map.at(key1);
+		const auto& search_key2_in_key1 = std::find_if(neighbors_key1.begin(), neighbors_key1.end(), [&](const value_type& element) { return element.first == key2; });
+		if constexpr(std::is_same_v<Directed, std::true_type>) {
 			return search_key2_in_key1 != neighbors_key1.end();
 		} else {
-			const auto& neighbors_key2 = graph_map[key2];
-			auto search_key1_in_key2 = std::find_if(neighbors_key2.begin(), neighbors_key2.end(), [&](const value_type& element) { return element.first == key1; });
+			const auto& neighbors_key2 = graph_map.at(key2);
+			const auto& search_key1_in_key2 = std::find_if(neighbors_key2.begin(), neighbors_key2.end(), [&](const value_type& element) { return element.first == key1; });
 			return search_key2_in_key1 != neighbors_key1.end() && search_key1_in_key2 != neighbors_key2.end();
 		}
 		return false;
-	}
-	bool remove_edge_directed(const key_type& key1, const key_type& key2) {
-		bool checkEdge = checkEdgeExists(key1, key2);
-		if(!checkEdge) {
-			throw EdgeNotFound("Edge not found, try adding edge first!\n");
-		}
-		auto& neighbors_key1 = graph_map[key1];
-		auto search_key2_in_key1 = std::find_if(neighbors_key1.begin(), neighbors_key1.end(), [&](const value_type& element) { return element.first == key2; });
-		if(search_key2_in_key1 != neighbors_key1.end()) {
-			neighbors_key1.erase(search_key2_in_key1);
-			--num_edges;
-		}
-		return true;
-	}
-	bool remove_edge_undirected(const key_type& key1, const key_type& key2) {
-		bool checkEdge = checkEdgeExists(key1, key2);
-		if(!checkEdge) {
-			throw EdgeNotFound("Edge not found, try adding edge first!\n");
-		}
-		auto& neighbors_key1 = graph_map[key1];
-		auto& neighbors_key2 = graph_map[key2];
-		auto search_key2_in_key1 = std::find_if(neighbors_key1.begin(), neighbors_key1.end(), [&](const value_type& element) { return element.first == key2; });
-		auto search_key1_in_key2 = std::find_if(neighbors_key2.begin(), neighbors_key2.end(), [&](const value_type& element) { return element.first == key1; });
-		if(search_key2_in_key1 != neighbors_key1.end() && search_key1_in_key2 != neighbors_key2.end()) {
-			neighbors_key1.erase(search_key2_in_key1);
-			neighbors_key2.erase(search_key1_in_key2);
-			num_edges -= 2;
-		}
-		return true;
-	}
-	bool insert_edge_directed(const key_type& key1, const key_type& key2, const double w = 1.0) {
-		bool checkEdge = checkEdgeExists(key1, key2);
-		if(checkEdge) {
-			throw EdgeExists("Edge already exists, try removing first!\n");
-		}
-		graph_map[key1].push_back({key2, w});
-		++num_edges;
-		return true;
-	}
-	bool insert_edge_undirected(const key_type& key1, const key_type& key2, const double w = 1.0) {
-		bool checkEdge = checkEdgeExists(key1, key2);
-		if(checkEdge) {
-			throw EdgeExists("Edge already exists, try removing first!\n");
-		}
-		graph_map[key1].push_back({key2, w});
-		graph_map[key2].push_back({key1, w});
-		num_edges += 2;
-		return true;
 	}
 
 	// constructors
@@ -138,6 +90,7 @@ struct graph_base
 	}
 	template <class T>
 	graph_base(std::initializer_list<T> l) : num_nodes(0), num_edges(0) {
+		static_assert(std::is_copy_constructible_v<T>, "Initializer list elements must be copy constructible!\n");
 		for(auto iter = l.begin(); iter != l.end(); ++iter) {
 			insert_node(*iter);
 		}
@@ -147,7 +100,7 @@ struct graph_base
 	size_type node_count() const noexcept { return num_nodes; }
 	size_type edge_count() const noexcept { return num_edges; }
 	bool insert_node(const key_type& key) {
-		bool check = check_key_exist(key);
+		const auto check = check_key_exist(key);
 		if(check) {
 			throw NodeExists("Try removing node first!\n");
 		}
@@ -156,21 +109,21 @@ struct graph_base
 		return true;
 	}
 	bool insert_node(key_type&& key) {
-		bool check = check_key_exist(key);
+		const auto check = check_key_exist(key);
 		if(check) {
 			throw NodeExists("Try removing node first!\n");
 		}
-		graph_map[std::move(key)];
+		graph_map.insert(std::move(key));
 		++num_nodes;
 		return true;
 	}
 	bool insert_edge(const key_type& key1, const key_type& key2, const double w = 1.0) {
-		bool check1 = check_key_exist(key1);
-		bool check2 = check_key_exist(key2);
+		const auto check1 = check_key_exist(key1);
+		const auto check2 = check_key_exist(key2);
 		if(!check1 || !check2) {
 			throw NodeNotFound("Check node was added to the container!\n");
 		}
-		if (!Directed) {
+		if constexpr(!std::is_same_v<Directed, std::true_type>) {
 			return insert_edge_undirected(key1, key2, w);
 		} else {
 			return insert_edge_directed(key1, key2, w);
@@ -178,7 +131,7 @@ struct graph_base
 		return false;
 	}
 	bool remove_node(const key_type& key) {
-		bool check = check_key_exist(key);
+		const auto check = check_key_exist(key);
 		if(!check) {
 			throw NodeNotFound("Check node was added to the container!\n");
 		}
@@ -188,25 +141,73 @@ struct graph_base
 		return true;
 	}
 	bool remove_edge(const key_type& key1, const key_type& key2) {
-		bool check1 = check_key_exist(key1);
-		bool check2 = check_key_exist(key2);
+		const auto check1 = check_key_exist(key1);
+		const auto check2 = check_key_exist(key2);
 		if(!check1 || !check2) {
 			throw NodeNotFound("Check node was added to the container!\n");
 		}
-		if(Directed) {
+		if constexpr(std::is_same_v<Directed, std::true_type>) {
 			return remove_edge_directed(key1, key2);
 		} else {
 			return remove_edge_undirected(key1, key2);
 		}	
 		return false;
 	}
-	std::pair<mapped_const_iterator, mapped_const_iterator> neighbors(const key_type& key) {
-		bool check = check_key_exist(key);
+	std::pair<mapped_const_iterator, mapped_const_iterator> neighbors(const key_type& key) const {
+		const auto check = check_key_exist(key);
 		if(!check) {
 			throw NodeNotFound("Check node was added to the container!\n");
 		}
-		const auto& neighborList = graph_map[key];
+		const auto& neighborList = graph_map.at(key);
 		return {neighborList.cbegin(), neighborList.cend()};
+	}
+	bool remove_edge_directed(const key_type& key1, const key_type& key2) {
+		const auto checkEdge = checkEdgeExists(key1, key2);
+		if(!checkEdge) {
+			throw EdgeNotFound("Edge not found, try adding edge first!\n");
+		}
+		auto& neighbors_key1 = graph_map.at(key1);
+		const auto& search_key2_in_key1 = std::find_if(neighbors_key1.begin(), neighbors_key1.end(), [&](const value_type& element) { return element.first == key2; });
+		if(search_key2_in_key1 != neighbors_key1.end()) {
+			neighbors_key1.erase(search_key2_in_key1);
+			--num_edges;
+		}
+		return true;
+	}
+	bool remove_edge_undirected(const key_type& key1, const key_type& key2) {
+		const auto checkEdge = checkEdgeExists(key1, key2);
+		if(!checkEdge) {
+			throw EdgeNotFound("Edge not found, try adding edge first!\n");
+		}
+		auto& neighbors_key1 = graph_map[key1];
+		auto& neighbors_key2 = graph_map[key2];
+		const auto& search_key2_in_key1 = std::find_if(neighbors_key1.begin(), neighbors_key1.end(), [&](const value_type& element) { return element.first == key2; });
+		const auto& search_key1_in_key2 = std::find_if(neighbors_key2.begin(), neighbors_key2.end(), [&](const value_type& element) { return element.first == key1; });
+		if(search_key2_in_key1 != neighbors_key1.end() && search_key1_in_key2 != neighbors_key2.end()) {
+			neighbors_key1.erase(search_key2_in_key1);
+			neighbors_key2.erase(search_key1_in_key2);
+			num_edges -= 2;
+		}
+		return true;
+	}
+	bool insert_edge_directed(const key_type& key1, const key_type& key2, const double w = 1.0) {
+		const auto checkEdge = checkEdgeExists(key1, key2);
+		if(checkEdge) {
+			throw EdgeExists("Edge already exists, try removing first!\n");
+		}
+		graph_map.at(key1).push_back({key2, w});
+		++num_edges;
+		return true;
+	}
+	bool insert_edge_undirected(const key_type& key1, const key_type& key2, const double w = 1.0) {
+		const auto checkEdge = checkEdgeExists(key1, key2);
+		if(checkEdge) {
+			throw EdgeExists("Edge already exists, try removing first!\n");
+		}
+		graph_map.at(key1).push_back({key2, w});
+		graph_map.at(key2).push_back({key1, w});
+		num_edges += 2;
+		return true;
 	}
 	bool empty() const noexcept {
 		return graph_map.empty();
@@ -214,7 +215,7 @@ struct graph_base
 	void clear() noexcept {
 		graph_map.clear();
 	}
-	size_type size() noexcept{
+	size_type size() const noexcept{
 		graph_map.size();
 	}
 };
