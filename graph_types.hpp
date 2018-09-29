@@ -1,6 +1,8 @@
 #ifndef GRAPH_TYPES_HPP
 #define GRAPH_TYPES_HPP
 
+enum sort_policy {asc=0, desc=2, weight=4};
+
 template <class Type,
 	  class Mapped,
 	  class Container,

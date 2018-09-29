@@ -161,6 +161,34 @@ struct graph_base
 		const auto& neighborList = graph_map.at(key);
 		return {neighborList.cbegin(), neighborList.cend()};
 	}
+	template <class F>
+	std::pair<mapped_const_iterator, mapped_const_iterator> neighbors(const key_type& key, const F& f) {
+		static_assert(std::is_function_v<F>, "Custom comparision function must be a function type!\n");
+		const auto check = check_key_exist(key);
+		if(!check) {
+			throw NodeNotFound("Check node was added to the container!\n");
+		}
+		auto& neighborList = graph_map.at(key);
+		std::sort(neighborList.begin(), neighborList.end(), f);
+		return {neighborList.cbegin(), neighborList.cend()};
+	}
+	std::pair<mapped_const_iterator, mapped_const_iterator> neighbors(const key_type& key, int policy) {
+		const auto check = check_key_exist(key);
+		if(!check) {
+			throw NodeNotFound("Check node was added to the container!\n");
+		}
+		auto& neighborList = graph_map.at(key);
+		if (policy == sort_policy::asc) {
+			std::sort(neighborList.begin(), neighborList.end(), [](const auto& e1, const auto& e2) { return e1.first < e2.first; });
+		} else if (policy == (sort_policy::asc | sort_policy::weight)) {
+			std::sort(neighborList.begin(), neighborList.end(), [](const auto& e1, const auto& e2) { return e1.second < e2.second; });
+		} else if (policy == sort_policy::desc) {
+			std::sort(neighborList.begin(), neighborList.end(), [](const auto& e1, const auto& e2) { return e1.first > e2.first; });
+		} else if (policy == (sort_policy::desc | sort_policy::weight)) {
+			std::sort(neighborList.begin(), neighborList.end(), [](const auto& e1, const auto& e2) { return e1.second > e2.second; });
+		}
+		return {neighborList.cbegin(), neighborList.cend()};
+	}
 	bool remove_edge_directed(const key_type& key1, const key_type& key2) {
 		const auto checkEdge = checkEdgeExists(key1, key2);
 		if(!checkEdge) {
