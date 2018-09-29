@@ -1,6 +1,7 @@
 #ifndef GRAPH_BASE_HPP
 #define GRAPH_BASE_HPP
 
+#include <deque>
 #include <cstdint>
 #include <functional>
 #include <initializer_list>
@@ -40,6 +41,7 @@ struct graph_base
 	using mapped_const_iterator   = typename mapped_type::const_iterator;
 
 	// members
+	bool weighted_graph_flag {false};
 	container_type graph_map;
 	size_type num_nodes;
 	size_type num_edges;
@@ -123,6 +125,9 @@ struct graph_base
 		if(!check1 || !check2) {
 			throw NodeNotFound("Check node was added to the container!\n");
 		}
+		if(w != 1.0) {
+			weighted_graph_flag = true;
+		}
 		if constexpr(!std::is_same_v<Directed, std::true_type>) {
 			return insert_edge_undirected(key1, key2, w);
 		} else {
@@ -163,7 +168,7 @@ struct graph_base
 	}
 	template <class F>
 	std::pair<mapped_const_iterator, mapped_const_iterator> neighbors(const key_type& key, const F& f) {
-		static_assert(std::is_function_v<F>, "Custom comparision function must be a function type!\n");
+		static_assert(std::is_invocable_v<F, const value_type&, const value_type&>, "Custom comparision function must be a function type!\n");
 		const auto check = check_key_exist(key);
 		if(!check) {
 			throw NodeNotFound("Check node was added to the container!\n");
@@ -172,7 +177,7 @@ struct graph_base
 		std::sort(neighborList.begin(), neighborList.end(), f);
 		return {neighborList.cbegin(), neighborList.cend()};
 	}
-	std::pair<mapped_const_iterator, mapped_const_iterator> neighbors(const key_type& key, int policy) {
+	std::pair<mapped_const_iterator, mapped_const_iterator> neighbors(const key_type& key, const int& policy) {
 		const auto check = check_key_exist(key);
 		if(!check) {
 			throw NodeNotFound("Check node was added to the container!\n");
@@ -188,6 +193,121 @@ struct graph_base
 			std::sort(neighborList.begin(), neighborList.end(), [](const auto& e1, const auto& e2) { return e1.second > e2.second; });
 		}
 		return {neighborList.cbegin(), neighborList.cend()};
+	}
+	std::pair<mapped_const_iterator, mapped_const_iterator> neighbors(const key_type& key, const sort_policy& policy) {
+		const auto check = check_key_exist(key);
+		if(!check) {
+			throw NodeNotFound("Check node was added to the container!\n");
+		}
+		auto& neighborList = graph_map.at(key);
+		if (policy == sort_policy::asc) {
+			std::sort(neighborList.begin(), neighborList.end(), [](const auto& e1, const auto& e2) { return e1.first < e2.first; });
+		} else if (policy == (sort_policy::asc | sort_policy::weight)) {
+			std::sort(neighborList.begin(), neighborList.end(), [](const auto& e1, const auto& e2) { return e1.second < e2.second; });
+		} else if (policy == sort_policy::desc) {
+			std::sort(neighborList.begin(), neighborList.end(), [](const auto& e1, const auto& e2) { return e1.first > e2.first; });
+		} else if (policy == (sort_policy::desc | sort_policy::weight)) {
+			std::sort(neighborList.begin(), neighborList.end(), [](const auto& e1, const auto& e2) { return e1.second > e2.second; });
+		}
+		return {neighborList.cbegin(), neighborList.cend()};
+	}
+	std::deque<key_type> get_path(const key_type& start, const key_type& end, const std::map<key_type, key_type>& parents) const {
+		std::deque<key_type> path;
+		path.push_front(end);
+
+		key_type current = end;
+		while(parents.at(current) != start) {
+			current = parents.at(current);
+			path.push_front(current);
+		}
+		path.push_front(parents.at(current));
+		return path;
+	}
+	// Function f must take a const key_type&, cont key_type&, and a const std::map<key_type, key_type>& and returns a result of function type F
+	template <class P, class F>
+	typename std::result_of<F(const key_type&, const key_type&, const std::map<key_type, key_type>&)>::type BFS(const key_type& start, const key_type& end, const P& p, const F& f) {
+		static_assert(std::is_invocable_v<F, const key_type&, const key_type&, const std::map<key_type,key_type>&>, "End function must be a function type!\n");
+		std::deque<key_type> queue;
+		std::map<key_type, bool> visitedRef;
+		std::map<key_type, key_type> parent;
+
+		queue.push_back(start);
+		visitedRef[start] = true;
+
+		while(!queue.empty()) {
+			const auto current = queue.front();
+			queue.pop_front();
+
+			if(current == end) {
+				return f(start, end, parent);
+			}
+
+			auto iter_pair = neighbors(current, p);
+			for(auto iter = iter_pair.first; iter != iter_pair.second; ++iter) {
+				if(!visitedRef[iter->first]) {
+					visitedRef[iter->first] = true;
+					parent[iter->first] = current;
+					queue.push_back(iter->first);
+				}
+			}
+		}
+		return {};
+	}
+	template <class P>
+	std::deque<key_type> BFS(const key_type& start, const key_type& end, const P& p) {
+		std::deque<key_type> queue;
+		std::map<key_type, bool> visitedRef;
+		std::map<key_type, key_type> parent;
+
+		queue.push_back(start);
+		visitedRef[start] = true;
+
+		while(!queue.empty()) {
+			const auto current = queue.front();
+			queue.pop_front();
+
+			if(current == end) {
+				return get_path(start, end, parent);
+			}
+
+			auto iter_pair = neighbors(current, p);
+			for(auto iter = iter_pair.first; iter != iter_pair.second; ++iter) {
+				if(!visitedRef[iter->first]) {
+					visitedRef[iter->first] = true;
+					parent[iter->first] = current;
+					queue.push_back(iter->first);
+				}
+			}
+		}
+		return {};
+	}
+
+	std::deque<key_type> BFS(const key_type& start, const key_type& end) {
+		std::deque<key_type> queue;
+		std::map<key_type, bool> visitedRef;
+		std::map<key_type, key_type> parent;
+
+		queue.push_back(start);
+		visitedRef[start] = true;
+
+		while(!queue.empty()) {
+			const auto current = queue.front();
+			queue.pop_front();
+
+			if(current == end) {
+				return get_path(start, end, parent);
+			}
+
+			auto iter_pair = neighbors(current);
+			for(auto iter = iter_pair.first; iter != iter_pair.second; ++iter) {
+				if(!visitedRef[iter->first]) {
+					visitedRef[iter->first] = true;
+					parent[iter->first] = current;
+					queue.push_back(iter->first);
+				}
+			}
+		}
+		return {};
 	}
 	bool remove_edge_directed(const key_type& key1, const key_type& key2) {
 		const auto checkEdge = checkEdgeExists(key1, key2);
