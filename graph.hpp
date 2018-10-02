@@ -12,6 +12,8 @@
 #include <type_traits>
 #include <utility>
 #include <exception>
+#include <variant>
+#include <any>
 #include "graph_exception.hpp"
 #include "graph_types.hpp"
 
@@ -211,22 +213,22 @@ struct graph_base
 		}
 		return {neighborList.cbegin(), neighborList.cend()};
 	}
-	std::deque<key_type> get_path(const key_type& start, const key_type& end, const std::map<key_type, key_type>& parents) const {
-		std::deque<key_type> path;
-		path.push_front(end);
+	std::deque<key_type> get_path(const key_type& start, const key_type& end, const std::map<key_type, key_type>& parent, bool weighted=false) const {
+		auto path = std::deque<key_type> {};
+		path.push_back(end);
 
 		key_type current = end;
-		while(parents.at(current) != start) {
-			current = parents.at(current);
+		while(parent.at(current) != start) {
+			current = parent.at(current);
 			path.push_front(current);
 		}
-		path.push_front(parents.at(current));
+		path.push_front(parent.at(current));
 		return path;
 	}
-	// Function f must take a const key_type&, cont key_type&, and a const std::map<key_type, key_type>& and returns a result of function type F
-	template <class P, class F>
-	typename std::result_of<F(const key_type&, const key_type&, const std::map<key_type, key_type>&)>::type BFS(const key_type& start, const key_type& end, const P& p, const F& f) {
-		static_assert(std::is_invocable_v<F, const key_type&, const key_type&, const std::map<key_type,key_type>&>, "End function must be a function type!\n");
+	template <class P, class F1, class F2>
+	typename std::result_of<F1(const key_type&, const key_type&, const std::map<key_type, key_type>&)>::type BFS(const key_type& start, const key_type& end, const P& p, const F1& f1, const F2& f2, std::enable_if_t<std::is_invocable_v<F1(const key_type&, const key_type&, const std::map<key_type, key_type>&)>>* = nullptr, std::enable_if_t<std::is_invocable_v<const value_type&>>* = nullptr) {
+		static_assert(std::is_invocable_v<F1, const key_type&, const key_type&, const std::map<key_type,key_type>&>, "End function must be a function type!\n");
+		static_assert(std::is_invocable_v<F2, const value_type&>, "Neighbor removal function must be a function type!\n");
 		std::deque<key_type> queue;
 		std::map<key_type, bool> visitedRef;
 		std::map<key_type, key_type> parent;
@@ -239,11 +241,13 @@ struct graph_base
 			queue.pop_front();
 
 			if(current == end) {
-				return f(start, end, parent);
+				return f1(start, end, parent);
 			}
 
-			auto iter_pair = neighbors(current, p);
-			for(auto iter = iter_pair.first; iter != iter_pair.second; ++iter) {
+			auto[start, stop] = neighbors(current, p);
+			auto ncopy = std::vector<value_type> {};
+			std::remove_copy_if(start, stop, std::back_inserter(ncopy), std::not_fn(f2));
+			for(auto iter = ncopy.begin(); iter != ncopy.end(); ++iter) {
 				if(!visitedRef[iter->first]) {
 					visitedRef[iter->first] = true;
 					parent[iter->first] = current;
@@ -253,8 +257,38 @@ struct graph_base
 		}
 		return {};
 	}
-	template <class P>
-	std::deque<key_type> BFS(const key_type& start, const key_type& end, const P& p) {
+	template <class F1>
+	typename std::result_of<F1(const key_type&, const key_type&, const std::map<key_type, key_type>&)>::type BFS(const key_type& start, const key_type& end, const F1& f1, std::enable_if_t<std::is_invocable_v<F1, const key_type&, const key_type&, const std::map<key_type,key_type>&>>* = nullptr) {
+		static_assert(std::is_invocable_v<F1, const key_type&, const key_type&, const std::map<key_type,key_type>&>, "End function must be a function type!\n");
+		std::deque<key_type> queue;
+		std::map<key_type, bool> visitedRef;
+		std::map<key_type, key_type> parent;
+
+		queue.push_back(start);
+		visitedRef[start] = true;
+
+		while(!queue.empty()) {
+			const auto current = queue.front();
+			queue.pop_front();
+
+			if(current == end) {
+				return f1(start, end, parent);
+			}
+
+			const auto&[start, stop] = neighbors(current);
+			for(auto iter = start; iter != stop; ++iter) {
+				if(!visitedRef[iter->first]) {
+					visitedRef[iter->first] = true;
+					parent[iter->first] = current;
+					queue.push_back(iter->first);
+				}
+			}
+		}
+		return {};
+	}
+	template <class F2>
+	std::deque<key_type> BFS(const key_type& start, const key_type& end, const F2& f2, std::enable_if_t<std::is_invocable_v<F2, const value_type&>>* = nullptr) {
+		static_assert(std::is_invocable_v<F2, const value_type&>, "Neighbor removal function must be a function type!\n");
 		std::deque<key_type> queue;
 		std::map<key_type, bool> visitedRef;
 		std::map<key_type, key_type> parent;
@@ -270,8 +304,70 @@ struct graph_base
 				return get_path(start, end, parent);
 			}
 
-			auto iter_pair = neighbors(current, p);
-			for(auto iter = iter_pair.first; iter != iter_pair.second; ++iter) {
+			const auto&[start, stop] = neighbors(current);
+			auto ncopy = std::vector<value_type> {};
+			std::remove_copy_if(start, stop, std::back_inserter(ncopy), std::not_fn(f2));
+			for(auto iter = ncopy.begin(); iter != ncopy.end(); ++iter) {
+				if(!visitedRef[iter->first]) {
+					visitedRef[iter->first] = true;
+					parent[iter->first] = current;
+					queue.push_back(iter->first);
+				}
+			}
+		}
+		return {};
+	}
+	template <class P, class F1>
+	typename std::result_of<F1(const key_type&, const key_type&, const std::map<key_type, key_type>&)>::type BFS(const key_type& start, const key_type& end, const P& p, const F1& f1, std::enable_if_t<std::is_invocable_v<F1, const key_type&, const key_type&, const std::map<key_type,key_type>&>>* = nullptr) {
+		static_assert(std::is_invocable_v<F1, const key_type&, const key_type&, const std::map<key_type,key_type>&>, "End function must be a function type!\n");
+		std::deque<key_type> queue;
+		std::map<key_type, bool> visitedRef;
+		std::map<key_type, key_type> parent;
+
+		queue.push_back(start);
+		visitedRef[start] = true;
+
+		while(!queue.empty()) {
+			const auto current = queue.front();
+			queue.pop_front();
+
+			if(current == end) {
+				return f1(start, end, parent);
+			}
+
+			const auto&[start, stop] = neighbors(current, p);
+			for(auto iter = start; iter != stop; ++iter) {
+				if(!visitedRef[iter->first]) {
+					visitedRef[iter->first] = true;
+					parent[iter->first] = current;
+					queue.push_back(iter->first);
+				}
+			}
+		}
+		return {};
+	}
+	template <class P, class F2>
+	std::deque<key_type> BFS(const key_type& start, const key_type& end, const P& p, const F2& f2, std::enable_if_t<std::is_invocable_v<F2, const value_type&>>* = nullptr) {
+		static_assert(std::is_invocable_v<F2, const value_type&>, "Neighbor removal function must be a function type!\n");
+		std::deque<key_type> queue;
+		std::map<key_type, bool> visitedRef;
+		std::map<key_type, key_type> parent;
+
+		queue.push_back(start);
+		visitedRef[start] = true;
+
+		while(!queue.empty()) {
+			const auto current = queue.front();
+			queue.pop_front();
+
+			if(current == end) {
+				return get_path(start, end, parent);
+			}
+
+			const auto&[start, stop] = neighbors(current, p);
+			auto ncopy = std::vector<value_type> {};
+			std::remove_copy_if(start, stop, std::back_inserter(ncopy), std::not_fn(f2));
+			for(auto iter = ncopy.begin(); iter != ncopy.end(); ++iter) {
 				if(!visitedRef[iter->first]) {
 					visitedRef[iter->first] = true;
 					parent[iter->first] = current;
@@ -282,6 +378,34 @@ struct graph_base
 		return {};
 	}
 
+	template <class P>
+	std::deque<key_type> BFS(const key_type& start, const key_type& end, const P& p, std::enable_if_t<!std::is_invocable_v<P, const value_type&> && !std::is_invocable_v<P, const key_type&, const key_type&, const std::map<key_type,key_type>&>>* = nullptr) {
+		std::deque<key_type> queue;
+		std::map<key_type, bool> visitedRef;
+		std::map<key_type, key_type> parent;
+
+		queue.push_back(start);
+		visitedRef[start] = true;
+
+		while(!queue.empty()) {
+			const auto current = queue.front();
+			queue.pop_front();
+
+			if(current == end) {
+				return get_path(start, end, parent);
+			}
+
+			const auto&[start, stop] = neighbors(current, p);
+			for(auto iter = start; iter != stop; ++iter) {
+				if(!visitedRef[iter->first]) {
+					visitedRef[iter->first] = true;
+					parent[iter->first] = current;
+					queue.push_back(iter->first);
+				}
+			}
+		}
+		return {};
+	}
 	std::deque<key_type> BFS(const key_type& start, const key_type& end) {
 		std::deque<key_type> queue;
 		std::map<key_type, bool> visitedRef;
@@ -298,12 +422,226 @@ struct graph_base
 				return get_path(start, end, parent);
 			}
 
-			auto iter_pair = neighbors(current);
-			for(auto iter = iter_pair.first; iter != iter_pair.second; ++iter) {
+			const auto&[start, stop] = neighbors(current);
+			for(auto iter = start; iter != stop; ++iter) {
 				if(!visitedRef[iter->first]) {
 					visitedRef[iter->first] = true;
 					parent[iter->first] = current;
 					queue.push_back(iter->first);
+				}
+			}
+		}
+		return {};
+	}
+	template <class P, class F1, class F2>
+	typename std::result_of<F1(const key_type&, const key_type&, const std::map<key_type, key_type>&)>::type DFS(const key_type& start, const key_type& end, const P& p, const F1& f1, const F2& f2, std::enable_if_t<std::is_invocable_v<F1(const key_type&, const key_type&, const std::map<key_type, key_type>&)>>* = nullptr, std::enable_if_t<std::is_invocable_v<const value_type&>>* = nullptr) {
+		static_assert(std::is_invocable_v<F1, const key_type&, const key_type&, const std::map<key_type,key_type>&>, "End function must be a function type!\n");
+		static_assert(std::is_invocable_v<F2, const value_type&>, "Neighbor removal function must be a function type!\n");
+		std::deque<key_type> stack;
+		std::map<key_type, bool> visitedRef;
+		std::map<key_type, key_type> parent;
+
+		stack.push_back(start);
+
+		while(!stack.empty()) {
+			const auto current = stack.front();
+			stack.pop_front();
+
+			if(current == end) {
+				return f1(start, end, parent);
+			}
+
+			if(!visitedRef[current]) {
+				visitedRef[current] = true;
+				auto[start, stop] = neighbors(current, p);
+				auto ncopy = std::vector<value_type> {};
+				std::remove_copy_if(start, stop, std::back_inserter(ncopy), std::not_fn(f2));
+				for(auto iter = ncopy.begin(); iter != ncopy.end(); ++iter) {
+						if(!visitedRef[iter->first]) {
+							parent[iter->first] = current;
+							stack.push_front(iter->first);
+						}
+				}
+			}
+		}
+		return {};
+	}
+	template <class F1>
+	typename std::result_of<F1(const key_type&, const key_type&, const std::map<key_type, key_type>&)>::type DFS(const key_type& start, const key_type& end, const F1& f1, std::enable_if_t<std::is_invocable_v<F1, const key_type&, const key_type&, const std::map<key_type,key_type>&>>* = nullptr) {
+		static_assert(std::is_invocable_v<F1, const key_type&, const key_type&, const std::map<key_type,key_type>&>, "End function must be a function type!\n");
+		std::deque<key_type> stack;
+		std::map<key_type, bool> visitedRef;
+		std::map<key_type, key_type> parent;
+
+		stack.push_back(start);
+
+		while(!stack.empty()) {
+			const auto current = stack.front();
+			stack.pop_front();
+
+			if(current == end) {
+				return f1(start, end, parent);
+			}
+
+			if(!visitedRef[current]) {
+				visitedRef[current] = true;
+				auto[start, stop] = neighbors(current);
+				for(auto iter = start; iter != stop; ++iter) {
+					if(!visitedRef[iter->first]) {
+						parent[iter->first] = current;
+						stack.push_front(iter->first);
+					}
+				}
+			}
+		}
+		return {};
+	}
+	template <class F2>
+	std::deque<key_type> DFS(const key_type& start, const key_type& end, const F2& f2, std::enable_if_t<std::is_invocable_v<F2, const value_type&>>* = nullptr) {
+		static_assert(std::is_invocable_v<F2, const value_type&>, "Neighbor removal function must be a function type!\n");
+		std::deque<key_type> stack;
+		std::map<key_type, bool> visitedRef;
+		std::map<key_type, key_type> parent;
+
+		stack.push_back(start);
+
+		while(!stack.empty()) {
+			const auto current = stack.front();
+			stack.pop_front();
+
+			if(current == end) {
+				return get_path(start, end, parent);
+			}
+
+			if(!visitedRef[current]) {
+				visitedRef[current] = true;
+				auto[start, stop] = neighbors(current);
+				auto ncopy = std::vector<value_type> {};
+				std::remove_copy_if(start, stop, std::back_inserter(ncopy), std::not_fn(f2));
+				for(auto iter = ncopy.begin(); iter != ncopy.end(); ++iter) {
+					if(!visitedRef[iter->first]) {
+						parent[iter->first] = current;
+						stack.push_front(iter->first);
+					}
+				}
+			}
+		}
+		return {};
+	}
+	template <class P, class F1>
+	typename std::result_of<F1(const key_type&, const key_type&, const std::map<key_type, key_type>&)>::type DFS(const key_type& start, const key_type& end, const P& p, const F1& f1, std::enable_if_t<std::is_invocable_v<F1, const key_type&, const key_type&, const std::map<key_type,key_type>&>>* = nullptr) {
+		static_assert(std::is_invocable_v<F1, const key_type&, const key_type&, const std::map<key_type,key_type>&>, "End function must be a function type!\n");
+		std::deque<key_type> stack;
+		std::map<key_type, bool> visitedRef;
+		std::map<key_type, key_type> parent;
+
+		stack.push_back(start);
+
+		while(!stack.empty()) {
+			const auto current = stack.front();
+			stack.pop_front();
+
+			if(current == end) {
+				return f1(start, end, parent);
+			}
+
+			if(!visitedRef[current]) {
+				visitedRef[current] = true;
+				auto[start, stop] = neighbors(current, p);
+				for(auto iter = start; iter != stop; ++iter) {
+					if(!visitedRef[iter->first]) {
+						parent[iter->first] = current;
+						stack.push_front(iter->first);
+					}
+				}
+			}
+		}
+		return {};
+	}
+	template <class P, class F2>
+	std::deque<key_type> DFS(const key_type& start, const key_type& end, const P& p, const F2& f2, std::enable_if_t<std::is_invocable_v<F2, const value_type&>>* = nullptr) {
+		static_assert(std::is_invocable_v<F2, const value_type&>, "Neighbor removal function must be a function type!\n");
+		std::deque<key_type> stack;
+		std::map<key_type, bool> visitedRef;
+		std::map<key_type, key_type> parent;
+
+		stack.push_back(start);
+
+		while(!stack.empty()) {
+			const auto current = stack.front();
+			stack.pop_front();
+
+			if(current == end) {
+				return get_path(start, end, parent);
+			}
+
+			if(!visitedRef[current]) {
+				visitedRef[current] = true;
+				auto[start, stop] = neighbors(current, p);
+				auto ncopy = std::vector<value_type> {};
+				std::remove_copy_if(start, stop, std::back_inserter(ncopy), std::not_fn(f2));
+				for(auto iter = ncopy.begin(); iter != ncopy.end(); ++iter) {
+					if(!visitedRef[iter->first]) {
+						parent[iter->first] = current;
+						stack.push_front(iter->first);
+					}
+				}
+			}
+		}
+		return {};
+	}
+	template <class P>
+	std::deque<key_type> DFS(const key_type& start, const key_type& end, const P& p, std::enable_if_t<!std::is_invocable_v<P, const value_type&> && !std::is_invocable_v<P, const key_type&, const key_type&, const std::map<key_type,key_type>&>>* = nullptr) {
+		std::deque<key_type> stack;
+		std::map<key_type, bool> visitedRef;
+		std::map<key_type, key_type> parent;
+
+		stack.push_back(start);
+
+		while(!stack.empty()) {
+			const auto current = stack.front();
+			stack.pop_front();
+
+			if(current == end) {
+				return get_path(start, end, parent);
+			}
+
+			if(!visitedRef[current]) {
+				visitedRef[current] = true;
+				auto[start, stop] = neighbors(current, p);
+				for(auto iter = start; iter != stop; ++iter) {
+					if(!visitedRef[iter->first]) {
+						parent[iter->first] = current;
+						stack.push_front(iter->first);
+					}
+				}
+			}
+		}
+		return {};
+	}
+	std::deque<key_type> DFS(const key_type& start, const key_type& end) {
+		std::deque<key_type> stack;
+		std::map<key_type, bool> visitedRef;
+		std::map<key_type, key_type> parent;
+
+		stack.push_back(start);
+
+		while(!stack.empty()) {
+			const auto current = stack.front();
+			stack.pop_front();
+
+			if(current == end) {
+				return get_path(start, end, parent);
+			}
+
+			if(!visitedRef[current]) {
+				visitedRef[current] = true;
+				auto[start, stop] = neighbors(current);
+				for(auto iter = start; iter != stop; ++iter) {
+					if(!visitedRef[iter->first]) {
+						parent[iter->first] = current;
+						stack.push_front(iter->first);
+					}
 				}
 			}
 		}
