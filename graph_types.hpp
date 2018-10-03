@@ -3,6 +3,11 @@
 
 enum sort_policy {asc=0, desc=2, weight=4, none=6};
 
+// interface
+struct node_explorer {
+	virtual ~node_explorer() = default;
+
+
 template <class Type,
 	  class Mapped,
 	  class Container,
