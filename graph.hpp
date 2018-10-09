@@ -1,6 +1,7 @@
 #ifndef GRAPH_BASE_HPP
 #define GRAPH_BASE_HPP
 
+#include <cmath>
 #include <set>
 #include <deque>
 #include <cstdint>
@@ -19,6 +20,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <iostream>
+
 #include "graph_types.hpp"
 
 template <class Type,
@@ -48,74 +50,172 @@ class graph_base
 		using mapped_const_iterator   = typename mapped_type::const_iterator;
 
 		// members
-		container_type graph_map;
-		std::unordered_map<Type, std::unordered_map<Type, double>> edge_map;
-		size_type num_nodes;
-		size_type num_edges;
+		const float NAN_TYPE = std::nanf("1");
+		container_type m_graph;
+		std::map<std::pair<value_type, value_type>, float> m_edgeWeight;
+		size_type m_nodeCount {0};
+		size_type m_edgeCount {0};
 
 		// helper functions
-		const_iterator key_search(const key_type& node) const {
+		const_iterator keySearch(const key_type& t_node) const {
 			if constexpr (std::is_same_v<container_type, std::map<Type,Mapped>>) {
-				auto iter = std::lower_bound(std::begin(graph_map), std::end(graph_map), node, [](const std::pair<value_type,mapped_type>& v1, const value_type& v2) { return v1.first < v2; });
-				return iter != std::end(graph_map) ? ++iter : iter;
+				auto iter = std::lower_bound(std::begin(m_graph), 
+						             std::end(m_graph), 
+						             t_node, 
+							     [](const std::pair<value_type,mapped_type>& t_value1, const value_type& t_value2) 
+							     	{ return t_value1.first < t_value2; }
+							    );
+				return iter != std::end(m_graph) ? ++iter : iter;
 			} else {
-				return std::find_if(std::begin(graph_map), std::end(graph_map), [&](const std::pair<value_type, mapped_type>& m) { return m.first == node; });
+				return std::find_if(std::begin(m_graph), 
+						    std::end(m_graph), 
+						    [&](const std::pair<value_type, mapped_type>& t_value) 
+						    	{ return t_value.first == t_node; }
+						   );
 			}
-		};
-		[[nodiscard]] bool key_exists(const key_type& node) const {
-			return key_search(node) != std::end(graph_map);
-		};
+		}
+		[[nodiscard]] bool keyExists(const key_type& t_node) const {
+			return keySearch(t_node) != std::end(m_graph);
+		}
+		[[nodiscard]] bool edgeExists(const key_type& t_node_first, const key_type& t_node_second) const {
+			try {
+				if constexpr(std::is_same_v<Directed, std::false_type>) {
+					auto b1 = std::isnan(m_edgeWeight.at({t_node_first, t_node_second}));
+					auto b2 = std::isnan(m_edgeWeight.at({t_node_second, t_node_first}));
+					return (!b1 && !b2);
+				} else {
+					auto b1 = std::isnan(m_edgeWeight.at({t_node_first, t_node_second}));
+					return !b1;
+				}
+			} catch (const std::out_of_range& e) {
+				return false;
+			}
+			return true;
+		}
+		void addEdgeUndirected(const key_type& t_node_first, const key_type& t_node_second, const float t_weight = 1.0) {
+			if(edgeExists(t_node_first, t_node_second)) {
+				// throw edge exists exception
+				std::cout << "Edge already exists!\n";
+			} else {
+				m_edgeWeight[std::pair(t_node_first,t_node_second)] = t_weight;
+				m_edgeWeight[std::pair(t_node_second,t_node_first)] = t_weight;
+				m_edgeCount += 2;
+			}
+		}
+		void addEdgeDirected(const key_type& t_node_first, const key_type& t_node_second, const float t_weight = 1.0) {
+			if(edgeExists(t_node_first, t_node_second)) {
+				// throw edge exists exception
+				std::cout << "Edge already exists!\n";
+			} else {
+				m_edgeWeight[std::pair(t_node_first,t_node_second)] = t_weight;
+				++m_edgeCount;
+			}
+		}
+		void removeEdgeUndirected(const key_type& t_node_first, const key_type& t_node_second) {
+			if(!edgeExists(t_node_first, t_node_second)) {
+				// throw edge exists exception
+				std::cout << "Edge does not exist!\n";
+			} else {
+				m_edgeWeight[std::pair(t_node_first,t_node_second)] = NAN_TYPE;
+				m_edgeWeight[std::pair(t_node_second,t_node_first)] = NAN_TYPE;
+				m_edgeCount -= 2;
+			}
+		}
+		void removeEdgeDirected(const key_type& t_node_first, const key_type& t_node_second) {
+			if(!edgeExists(t_node_first, t_node_second)) {
+				// throw edge exists exception
+				std::cout << "Edge does not exist!\n";
+			} else {
+				m_edgeWeight[std::pair(t_node_first,t_node_second)] = NAN_TYPE;
+				--m_edgeCount;
+			}
+		}
+		void invalidateEdges(const key_type& t_node) {
+			for(auto& [key, value] : m_edgeWeight) {
+				if(key.first == t_node || key.second == t_node) {
+					value = NAN_TYPE;
+					--m_edgeCount;
+				}
+			}
+		}
+
 	public:
 		// constructors
 		template<class Iter>
-		graph_base(const Iter& beg, const Iter& end) : num_nodes(0), num_edges(0) {
-			for(auto iter = beg; iter != end; ++iter) {
-				graph_map[*iter];
-				++num_nodes;
+		graph_base(const Iter& t_begin, const Iter& t_end) {
+			for(auto iter = t_begin; iter != t_end; ++iter) {
+				m_graph[*iter];
+				++m_nodeCount;
 			}
-		};
+		}
 		template<class T>
-		graph_base(const std::initializer_list<T>& init_list) : num_nodes(0), num_edges(0) {
-			for(auto iter = std::begin(init_list); iter != std::end(init_list); ++iter) {
-				graph_map[*iter];
-				++num_nodes;
+		graph_base(const std::initializer_list<T>& t_initializerList) {
+			for(auto iter = std::begin(t_initializerList); 
+			    iter != std::end(t_initializerList); 
+			    ++iter) {
+				m_graph[*iter];
+				++m_nodeCount;;
 			}
-		};
-		graph_base() : num_nodes(0), num_edges(0) {};
+		}
+		graph_base() = default;
 
 		// non modifying functions
-		size_type node_count() const noexcept {
-			return num_nodes;
-		};
-		size_type edge_count() const noexcept {
-			return num_edges;
-		};
+		size_type nodeCount() const noexcept {
+			return m_nodeCount;
+		}
+		size_type edgeCount() const noexcept {
+			return m_edgeCount;
+		}
 		size_type size() const noexcept {
-			graph_map.size();
-		};
+			m_graph.size();
+		}
 
 		// modifying functions
 		void clear() {
-			graph_map.clear();
-		};
-		void add_node(const key_type& node) {
-			if(key_exists(node)) {
+			m_graph.clear();
+		}
+		void addNode(const key_type& t_node) {
+			if(keyExists(t_node)) {
 				// throw exception
 				std::cout << "Key already exists!\n";
 			} else {
-				graph_map[node];
-				++num_nodes;
+				m_graph[t_node];
+				++m_nodeCount;
 			}
-		};
-		void add_node(key_type&& node) {
-			if(key_exists(node)) {
+		}
+		void addNode(key_type&& t_node) {
+			if(keyExists(t_node)) {
 				// throw exception
 				std::cout << "Key already exists!\n";
 			} else {
-				graph_map[std::move(node)];
-				++num_nodes;
+				m_graph[std::move(t_node)];
+				++m_nodeCount;
 			}
-		};
+		}
+		void removeNode(const key_type& t_node) {
+			if(!keyExists(t_node)) {
+				// throw exception
+				std::cout << "Key does not exist!\n";
+			} else {
+				m_graph.erase(t_node);
+				--m_nodeCount;
+				invalidateEdges(t_node);
+			}
+		}
+		void addEdge(const key_type& t_node_first, const key_type& t_node_second, const float t_weight = 1.0) {
+			if constexpr(std::is_same_v<Directed, std::false_type>) {
+				addEdgeUndirected(t_node_first, t_node_second, t_weight);
+			} else {
+				addEdgeDirected(t_node_first, t_node_second, t_weight);
+			}
+		}
+		void removeEdge(const key_type& t_node_first, const key_type& t_node_second) {
+			if constexpr(std::is_same_v<Directed, std::false_type>) {
+				removeEdgeUndirected(t_node_first, t_node_second);
+			} else {
+				removeEdgeDirected(t_node_first, t_node_second);
+			}
+		}
 };
 
 #endif
