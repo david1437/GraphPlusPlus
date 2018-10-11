@@ -1,5 +1,7 @@
 #ifndef GRAPH_TYPES_HPP
 #define GRAPH_TYPES_HPP
+		
+const float NAN_TYPE = std::nanf("1");
 
 template <class Type,
 	  class Mapped,

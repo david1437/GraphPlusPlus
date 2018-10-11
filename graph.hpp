@@ -50,7 +50,6 @@ class graph_base
 		using mapped_const_iterator   = typename mapped_type::const_iterator;
 
 		// members
-		const float NAN_TYPE = std::nanf("1");
 		container_type m_graph;
 		std::map<std::pair<value_type, value_type>, float> m_edgeWeight;
 		size_type m_nodeCount {0};
@@ -153,6 +152,12 @@ class graph_base
 		}
 
 	public:
+		// interface type
+		struct graph_traversal {
+			virtual ~graph_traversal() {};
+			graph_traversal(graph_traversal&&) = default;
+		};
+
 		// constructors
 		template<class Iter>
 		graph_base(const Iter& t_begin, const Iter& t_end) {
