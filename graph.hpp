@@ -152,10 +152,25 @@ class graph_base
 		}
 
 	public:
-		// interface type
+		// interface
 		struct graph_traversal {
-			virtual ~graph_traversal() {};
+			graph_traversal() = default;
 			graph_traversal(graph_traversal&&) = default;
+			graph_traversal(const graph_traversal&) = default;
+			virtual ~graph_traversal() {};
+
+			std::map<key_type, std::size_t> m_visited{};
+			container_type m_graph;
+			std::map<std::pair<value_type, value_type>, float> m_edges;
+			
+			void setInitialValues(const container_type& t_graph, const std::map<std::pair<value_type, value_type>, float>& t_edges) {
+				m_graph(t_graph);
+				m_edges(t_edges);
+			}
+			virtual mapped_type get_neighbors(const key_type& t_node) = 0;
+			virtual void visit(const key_type& t_node) = 0;
+			virtual bool is_visited(const key_type& t_node) = 0;
+			virtual std::vector<key_type> end_found(const std::map<key_type, key_type>& t_parents) = 0;
 		};
 
 		// constructors
